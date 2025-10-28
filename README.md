@@ -707,3 +707,6 @@ def main():
 if __name__ == "__main__":
     main()
 ```
+
+### CVE-2025-32462
+https://github.com/cyberpoul/CVE-2025-32462-POC/tree/main
